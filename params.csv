@@ -1,0 +1,15 @@
+scenario,chunk,seed,target_n,n_boot,model_type
+pilot_1k_basic,1,1001,1000,20,basic
+pilot_10k_basic,1,1002,10000,20,basic
+pilot_50k_basic,1,1003,50000,20,basic
+pilot_50k_clinical,1,1004,50000,20,clinical
+final_50k_clinical,1,2001,50000,100,clinical
+final_50k_clinical,2,2002,50000,100,clinical
+final_50k_clinical,3,2003,50000,100,clinical
+final_50k_clinical,4,2004,50000,100,clinical
+final_50k_clinical,5,2005,50000,100,clinical
+final_50k_clinical,6,2006,50000,100,clinical
+final_50k_clinical,7,2007,50000,100,clinical
+final_50k_clinical,8,2008,50000,100,clinical
+final_50k_clinical,9,2009,50000,100,clinical
+final_50k_clinical,10,2010,50000,100,clinical
