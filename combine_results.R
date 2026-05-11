@@ -64,6 +64,10 @@ resource_summary <- do.call(rbind, lapply(seq_len(nrow(group_keys)), function(i)
     suggested_walltime_for_same_task_min = ceiling(max(d$elapsed_sec, na.rm = TRUE) * 1.5 / 60),
     max_data_object_mb = round(max(d$data_object_mb, na.rm = TRUE), 2),
     max_peak_rss_mb_linux = round(max_peak, 2),
+    # rss_to_data_ratio is the key teaching metric: it shows how many times larger
+    # the actual process RSS is compared to the raw data object. Values of 10-100x
+    # are common in R, which is why you cannot size memory requests from data size alone.
+    rss_to_data_ratio = round(max_peak / max(d$data_object_mb, na.rm = TRUE), 1),
     suggested_mem_gb_from_peak_rss = suggested_mem_gb,
     stringsAsFactors = FALSE
   )
@@ -77,6 +81,49 @@ utils::write.csv(resource_summary, resource_summary_file, row.names = FALSE)
 cat("Wrote ", combined_metrics_file, "\n", sep = "")
 cat("Wrote ", resource_summary_file, "\n", sep = "")
 print(resource_summary)
+
+# Draw attention to the data-size vs. memory pitfall.
+cat("\n--- Memory sizing note ---\n")
+cat("max_data_object_mb is the size of the in-memory data frame only.\n")
+cat("max_peak_rss_mb_linux is the actual process memory measured from /proc.\n")
+cat("rss_to_data_ratio = peak RSS / data object size.\n")
+cat("Ratios well above 1x are typical in R: the interpreter, loaded packages,\n")
+cat("model matrices, and temporary objects during bootstrap resampling all\n")
+cat("add overhead. Basing --mem on your raw data size will likely cause\n")
+cat("out-of-memory failures. Always use measured peak RSS plus a safety margin.\n")
+cat("--------------------------\n")
+
+# Walltime scaling analysis: compare sec_per_boot across target_n values within
+# each model_type to reveal non-linear (superlinear) scaling with data size.
+#
+# If observed_ratio >> linear_ratio, runtime scales faster than linearly with n.
+# This means you cannot safely extrapolate a walltime estimate from a small pilot
+# to a much larger dataset -- you must pilot at or near your planned data size.
+for (mtype in unique(resource_summary$model_type)) {
+  rows <- resource_summary[
+    resource_summary$model_type == mtype &
+    !is.na(resource_summary$median_sec_per_boot),
+  ]
+  rows <- rows[order(rows$target_n), ]
+  if (nrow(rows) < 2) next
+
+  ref_spb <- rows$median_sec_per_boot[1]
+  ref_n   <- rows$target_n[1]
+  rows$n_ratio          <- round(rows$target_n / ref_n, 1)
+  rows$observed_ratio   <- round(rows$median_sec_per_boot / ref_spb, 2)
+  rows$linear_predicted <- round(rows$n_ratio, 2)
+
+  cat(sprintf("\n--- Walltime scaling: model_type = '%s' (baseline target_n = %d) ---\n",
+              mtype, ref_n))
+  print(rows[, c("scenario", "target_n", "median_sec_per_boot",
+                 "n_ratio", "observed_ratio", "linear_predicted")],
+        row.names = FALSE)
+  cat("observed_ratio: actual speedup in sec/boot relative to baseline\n")
+  cat("linear_predicted: what ratio would be if runtime scaled linearly with n\n")
+  cat("observed_ratio >> linear_predicted => superlinear scaling;\n")
+  cat("do NOT extrapolate walltime from a small-n pilot to large-n production runs.\n")
+  cat("-------------------------------------------------------------------\n")
+}
 
 # Statistical summary: only meaningful when combining tasks from the same scenario.
 if (!is.null(results) && nrow(results) > 0) {

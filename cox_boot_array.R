@@ -79,7 +79,7 @@ set.seed(seed)
 
 # Load and minimally clean the example data.
 # data("lung", package = "survival")
-lung <- lung
+lung <- survival::lung
 base <- lung[, c("time", "status", "age", "sex", "ph.ecog", "wt.loss")]
 base <- stats::na.omit(base)
 base$event <- as.integer(base$status == 2L)  # lung uses 1=censored, 2=dead.
@@ -105,10 +105,20 @@ cat("  chunk:    ", chunk, "\n", sep = "")
 cat("  target_n: ", target_n, "\n", sep = "")
 cat("  n_boot:   ", n_boot, "\n", sep = "")
 cat("  model:    ", deparse(form), "\n", sep = "")
-cat("  data object size MB: ", round(size_mb(dat), 2), "\n", sep = "")
+cat("  data object size MB: ", round(size_mb(dat), 2),
+    "  (in-memory data only -- total R process RSS will be much larger)\n", sep = "")
 
 start_time <- proc.time()[["elapsed"]]
 results_list <- vector("list", n_boot)
+
+# Write a checkpoint file periodically so that if the job is killed (OOM or
+# walltime), you can see how far it got and whether it was producing valid fits.
+# This is diagnostic, not restartable: the script always starts from bootstrap 1.
+# The checkpoint is overwritten at each interval and removed after the final
+# output is written successfully. A checkpoint file left in the output directory
+# after a run signals that the job did not complete.
+checkpoint_every <- max(5L, as.integer(ceiling(n_boot / 4)))
+checkpoint_file  <- file.path(outdir, sprintf("checkpoint_%03d_%s.csv", task_id, safe_name(scenario)))
 
 for (b in seq_len(n_boot)) {
   boot_index <- sample.int(nrow(dat), size = nrow(dat), replace = TRUE)
@@ -144,6 +154,15 @@ for (b in seq_len(n_boot)) {
 
   rm(boot_index, boot_dat, fit)
   if (b %% 25 == 0) gc(verbose = FALSE)
+
+  if (b %% checkpoint_every == 0) {
+    valid_ckpt <- !vapply(results_list[seq_len(b)], is.null, logical(1))
+    if (any(valid_ckpt)) {
+      utils::write.csv(do.call(rbind, results_list[seq_len(b)][valid_ckpt]),
+                       checkpoint_file, row.names = FALSE)
+    }
+    cat("  checkpoint: boot ", b, " / ", n_boot, "\n", sep = "")
+  }
 }
 
 gc(verbose = FALSE)
@@ -191,6 +210,8 @@ result_file <- file.path(outdir, sprintf("boot_%03d_%s.csv", task_id, safe_name(
 metrics_file <- file.path(outdir, sprintf("metrics_%03d_%s.csv", task_id, safe_name(scenario)))
 utils::write.csv(results, result_file, row.names = FALSE)
 utils::write.csv(metrics, metrics_file, row.names = FALSE)
+# Remove checkpoint now that final output has been written successfully.
+if (file.exists(checkpoint_file)) file.remove(checkpoint_file)
 
 cat("Finished task\n")
 cat("  elapsed seconds:       ", round(elapsed_sec, 2), "\n", sep = "")
@@ -198,5 +219,10 @@ cat("  seconds per bootstrap: ", round(elapsed_sec / n_boot, 4), "\n", sep = "")
 cat("  valid fits:            ", valid_fits, "\n", sep = "")
 cat("  failed fits:           ", failed_fits, "\n", sep = "")
 cat("  peak RSS MB, Linux:    ", round(peak_rss_mb_linux, 2), "\n", sep = "")
+dat_mb <- size_mb(dat)
+if (!is.na(peak_rss_mb_linux) && dat_mb > 0) {
+  cat("  RSS / data-object:     ", round(peak_rss_mb_linux / dat_mb, 1),
+      "x  <- process overhead; data size alone underestimates memory needs\n", sep = "")
+}
 cat("  wrote results:         ", result_file, "\n", sep = "")
 cat("  wrote metrics:         ", metrics_file, "\n", sep = "")
