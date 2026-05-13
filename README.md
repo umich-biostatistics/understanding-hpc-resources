@@ -49,7 +49,7 @@ It uses the small, freely available `survival::lung` dataset, then samples rows 
 5.  Combine final results:
 
     ``` bash
-    sbatch --export=ALL,ARRAY_JOB_ID=<array_job_id> combine_results.slurm
+    sbatch combine_results.slurm <array_job_id>
     ```
 
 ## Teaching points
