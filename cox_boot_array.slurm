@@ -8,11 +8,10 @@
 #SBATCH --mem=2G
 #SBATCH --time=00:20:00
 #SBATCH --array=1-4
-#SBATCH --output=logs/%A/%x-%A_%a.out
-#SBATCH --error=logs/%A/%x-%A_%a.err
+#SBATCH --output=logs/%x/%A/%A_%a.out
+#SBATCH --error=logs/%x/%A/%A_%a.err
 
-# Edit these module commands for your cluster.
-# On some systems: module load R/4.4.0
+module purge
 module load R/4.5
 
 # The R script also records timing and Linux /proc peak RSS in its metrics file.
