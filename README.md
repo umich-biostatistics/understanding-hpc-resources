@@ -28,7 +28,7 @@ It uses the small, freely available `survival::lung` dataset, then samples rows 
 2.  Run pilot tasks only:
 
     ``` bash
-    sbatch --array=1-4 cox_boot_array.slurm
+    sbatch --array=1-5 cox_boot_array.slurm
     ```
 
 3.  After completion, inspect per-task resource use:
@@ -43,7 +43,7 @@ It uses the small, freely available `survival::lung` dataset, then samples rows 
 4.  Use pilot results to right-size a larger final run. For example, after editing `--mem` and `--time` if needed:
 
     ``` bash
-    sbatch --array=5-14 cox_boot_array.slurm
+    sbatch --array=6-15 cox_boot_array.slurm
     ```
 
 5.  Combine final results:
@@ -56,7 +56,7 @@ It uses the small, freely available `survival::lung` dataset, then samples rows 
 
 - This is a serial R script, so each array task requests `--cpus-per-task=1`.
 - The job array provides throughput by running many independent one-core tasks.
-- `--array=5-14` means ten tasks are submitted, starting with array id 5.
+- `--array=6-15` means ten tasks are submitted, starting with array id 6.
 - The per-task memory request is not multiplied inside the script, but the cluster may allocate up to `MAX_RUNNING * --mem` while multiple tasks run.
 - Use a pilot run to measure actual elapsed time and memory, then request a safety margin rather than guessing.
 
@@ -82,13 +82,13 @@ Sources of overhead that make `rss_to_data_ratio` large:
 
 The pilot scenarios in `params.csv` vary `target_n` (1 k → 10 k → 50 k rows) deliberately: comparing `rss_to_data_ratio` across scenarios shows that the ratio is not constant, so you cannot simply scale your memory request linearly from data size. Always measure, then add a safety margin.
 
-### Walltime scales non-linearly with data size
+### Walltime does not scale predictably with data size
 
-A natural instinct after a pilot run is to scale walltime linearly: if fitting 1,000 rows took 0.01 sec/bootstrap, then 50,000 rows should take 0.5 sec/bootstrap. This is usually wrong.
+A natural instinct after a pilot run is to scale walltime linearly: if fitting 1,000 rows took 0.01 sec/bootstrap, then 50,000 rows should take 0.5 sec/bootstrap. That may overestimate or underestimate depending on the model and data size.
 
-Cox model computation is roughly O(n log n) or worse in the number of rows — not O(n). The same applies to many statistical models: the work per observation increases as the dataset grows because of sorting, risk-set accumulation, or matrix operations. In practice, a 50× increase in rows may produce a 100–200× increase in time per bootstrap.
+Cox model computation includes fixed overhead plus work that grows with the number of rows, sorting, risk-set accumulation, and model complexity. In these pilot results, the `basic` model grows less than linearly from 1k to 50k rows, while the `clinical` model grows worse than linearly from 100k to 200k rows. The lesson is not that one simple multiplier always works; the lesson is that you should measure near the planned production problem.
 
-`combine_results.R` makes this concrete. After a pilot run with the three `basic` scenarios (1k/10k/50k rows), it prints a scaling table showing `observed_ratio` (actual sec/boot relative to the 1k baseline) alongside `linear_predicted` (what linear scaling would predict). If `observed_ratio` substantially exceeds `linear_predicted`, runtime is superlinear.
+`combine_results.R` makes this concrete. It prints a scaling table showing `observed_ratio` (actual sec/boot relative to the smallest pilot for that model type) alongside `linear_predicted` (what linear scaling would predict). If `observed_ratio` is much larger than `linear_predicted`, runtime is worse than linear. If it is smaller, fixed overhead or other effects are dominating that interval.
 
 **The practical consequence:** pilot at or very near your planned production data size. A pilot with a 1% sample is not safe to extrapolate from unless you have a theoretical model for how complexity grows.
 
@@ -124,3 +124,26 @@ After a pilot task at or near your planned data size:
 - walltime for more bootstraps: `ceil(pilot_sec_per_boot * planned_bootstraps * 1.5 / 60)`
 - walltime when changing data size: **do not scale linearly** — run a new pilot at the target `n`
 - memory: `ceil(max(MaxRSS_from_sacct, peak_rss_mb_linux_from_metrics) * 1.5)` and round up to a convenient GB value
+
+### Worked estimate for the final run
+
+The final rows in `params.csv` use the same data size and model as the largest pilot:
+
+- pilot: `pilot_200k_clinical`, `target_n = 200000`, `n_boot = 500`
+- final: `final_200k_clinical`, `target_n = 200000`, `n_boot = 2000`
+
+Because the data size and model are the same, estimate final walltime from the measured `sec_per_boot`, not from the smaller 1k/10k/50k pilots. In the example output, `pilot_200k_clinical` has `median_sec_per_boot = 0.7547`.
+
+``` text
+estimated_minutes = 0.7547 sec/boot * 2000 bootstraps / 60
+                  = 25.2 minutes
+
+with_50_percent_margin = 25.2 * 1.5
+                       = 37.8 minutes
+```
+
+So a reasonable request for each final task would be around `--time=00:40:00` or `--time=00:45:00`, depending on how conservative you want to be.
+
+For memory, the same pilot reports `max_peak_rss_mb_linux = 332.94`. A 50% margin is about `500 MB`; in practice, round up to a convenient cluster request such as `--mem=1G` or keep `--mem=2G` for a simple, safe default. Compare this with `sacct MaxRSS` as well, because SLURM's accounting value is what many users will see first.
+
+Remember that these are **per-task** requests. Ten final array tasks do not require `10 * 45 minutes` in `--time`; each task gets its own walltime limit. If the scheduler runs all ten at once, the job may allocate up to `10 * --mem` across the cluster while it is running.

@@ -94,11 +94,12 @@ cat("out-of-memory failures. Always use measured peak RSS plus a safety margin.\
 cat("--------------------------\n")
 
 # Walltime scaling analysis: compare sec_per_boot across target_n values within
-# each model_type to reveal non-linear (superlinear) scaling with data size.
+# each model_type to reveal that scaling with data size is not predictable from
+# a single small pilot.
 #
-# If observed_ratio >> linear_ratio, runtime scales faster than linearly with n.
-# This means you cannot safely extrapolate a walltime estimate from a small pilot
-# to a much larger dataset -- you must pilot at or near your planned data size.
+# If observed_ratio > linear_ratio, runtime is worse than linear over that
+# interval. If observed_ratio < linear_ratio, fixed overhead or other effects are
+# dominating that interval. Either way, pilot at or near your planned data size.
 for (mtype in unique(resource_summary$model_type)) {
   rows <- resource_summary[
     resource_summary$model_type == mtype &
@@ -118,10 +119,12 @@ for (mtype in unique(resource_summary$model_type)) {
   print(rows[, c("scenario", "target_n", "median_sec_per_boot",
                  "n_ratio", "observed_ratio", "linear_predicted")],
         row.names = FALSE)
-  cat("observed_ratio: actual speedup in sec/boot relative to baseline\n")
+  cat("observed_ratio: actual sec/boot multiplier relative to baseline\n")
   cat("linear_predicted: what ratio would be if runtime scaled linearly with n\n")
-  cat("observed_ratio >> linear_predicted => superlinear scaling;\n")
-  cat("do NOT extrapolate walltime from a small-n pilot to large-n production runs.\n")
+  cat("observed_ratio > linear_predicted => worse-than-linear scaling over this interval\n")
+  cat("observed_ratio < linear_predicted => better-than-linear scaling over this interval,\n")
+  cat("often because fixed overhead dominates smaller runs\n")
+  cat("Use pilots at or near the planned data size for production walltime estimates.\n")
   cat("-------------------------------------------------------------------\n")
 }
 
