@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=2G
 #SBATCH --time=00:20:00
-#SBATCH --array=1-4
+#SBATCH --array=1-5
 #SBATCH --output=logs/%x/%A/%A_%a.out
 #SBATCH --error=logs/%x/%A/%A_%a.err
 
